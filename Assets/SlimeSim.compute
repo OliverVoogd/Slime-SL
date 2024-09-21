@@ -1,0 +1,75 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel RunSlime
+
+struct Agent {
+    float2 position;
+    float angle;
+};
+
+RWTexture2D<float4> TrailMap;
+RWStructuredBuffer<Agent> agents;
+
+int width, height;
+uint numAgents;
+float moveSpeed;
+float deltaTime;
+
+static const float PI = 3.14159265f;
+
+// hash function www.cs.ubc.ca/~rbridson/docs/schechter-sca-8-turbulence.pdf
+uint hash(uint state) {
+    state ^= 2747636419u;
+    state *= 2747636419u;
+    state ^= state >> 16;
+    state *= 2747636419u;
+    state ^= state >> 16;
+    state *= 2747636419u;
+    return state;
+}
+[numthreads(16,1,1)]
+void RunSlime(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x > numAgents) {
+        return;
+    }
+    
+    Agent agent = agents[id.x];
+    uint random = hash(agent.position.y * width + agent.position.x + hash(id.x));
+
+    float2 direction = float2(cos(agent.angle), sin(agent.angle));
+    float2 newpos = agent.position + direction * moveSpeed * deltaTime;
+
+    if (newpos.x < 0 || newpos.x >= width || newpos.y < 0 || newpos.y >= height) {
+        newpos.x = min(width - 0.01, max(0, newpos.x));
+        newpos.y = min(height - 0.01, max(0, newpos.y));
+        // generate a random number from 0 to 360??
+        agents[id.x].angle = random / 4294967295.0 * PI * 2;
+        //agents[id.x].angle = agents[id.x].angle * -1;
+    }
+    
+
+    agents[id.x].position = newpos;
+    TrailMap[int2(newpos.x, newpos.y)] = 1;
+}
+
+#pragma kernel ProcessTrailMap
+
+
+float decayRate;
+
+[numthreads(8, 8, 1)]
+void ProcessTrailMap(uint3 id : SV_DispatchThreadID) {
+    
+    // we should do average!!
+    // and decay
+    float4 sum = float4(0, 0, 0, 0);
+    for (int i = -1; i <= 1; i++) {
+        for (int z = -1; z <= 1; z++) {
+            sum += TrailMap[id.xy + float2(i, z)];
+        }
+    }
+    sum /= 9;
+
+    TrailMap[id.xy] = sum;
+    TrailMap[id.xy] = max(0, TrailMap[id.xy] - decayRate * deltaTime);
+}
